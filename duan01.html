@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Game Người Que</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: #eef1f5;
+      font-family: "Segoe UI", Arial, sans-serif;
+      color: #222;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: manipulation;
+    }
+
+    h1 {
+      margin-bottom: 10px;
+      font-size: 24px;
+    }
+
+    canvas {
+      width: 100%;
+      max-width: 800px;
+      background: #fff;
+      border: 3px solid #222;
+      border-radius: 12px;
+    }
+
+    .controls {
+      display: flex;
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    .controls button {
+      padding: 14px 30px;
+      font-size: 16px;
+      font-weight: 700;
+      border: none;
+      border-radius: 10px;
+      background: #222;
+      color: #fff;
+      cursor: pointer;
+    }
+
+    .controls button:active {
+      background: #555;
+    }
+
+    p.hint {
+      margin-top: 10px;
+      color: #666;
+      font-size: 14px;
+      text-align: center;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>🏃 Game Người Que</h1>
+  <canvas id="game" width="800" height="300"></canvas>
+  <div class="controls">
+    <button id="btnJump">⬆ NHẢY</button>
+    <button id="btnDuck">⬇ CÚI</button>
+  </div>
+  <p class="hint">Phím: <b>Space / ↑ / W</b> để nhảy • Giữ <b>↓ / S</b> để cúi • Nhảy qua xương rồng, cúi để chui qua
+    chim</p>
+
+  <script>
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height;
+    const GROUND = 240;
+    const GRAVITY = 0.7;
+    const JUMP_V = -13;
+
+    let state = 'ready';            // ready | playing | over
+    let player, obstacles, clouds, speed, score, frame, nextGap, groundOffset;
+    let best = 0;
+    try { best = Number(localStorage.getItem('stickman_best')) || 0; } catch (e) { }
+
+    function reset() {
+      player = { x: 80, y: GROUND, vy: 0, duck: false, onGround: true };
+      obstacles = [];
+      clouds = [
+        { x: 150, y: 50, s: 1 }, { x: 450, y: 80, s: 0.8 }, { x: 700, y: 40, s: 1.1 }
+      ];
+      speed = 6;
+      score = 0;
+      frame = 0;
+      groundOffset = 0;
+      nextGap = 350;
+    }
+    reset();
+
+    /* ---------- Điều khiển ---------- */
+    function jump() {
+      if (state === 'ready' || state === 'over') {
+        reset();
+        state = 'playing';
+      }
+      if (player.onGround && !player.duck) {
+        player.vy = JUMP_V;
+        player.onGround = false;
+      }
+    }
+    function setDuck(v) { player.duck = v; }
+
+    document.addEventListener('keydown', e => {
+      if (['Space', 'ArrowUp', 'KeyW'].includes(e.code)) { e.preventDefault(); jump(); }
+      if (['ArrowDown', 'KeyS'].includes(e.code)) { e.preventDefault(); setDuck(true); }
+    });
+    document.addEventListener('keyup', e => {
+      if (['ArrowDown', 'KeyS'].includes(e.code)) setDuck(false);
+    });
+    const btnJump = document.getElementById('btnJump');
+    const btnDuck = document.getElementById('btnDuck');
+    btnJump.addEventListener('pointerdown', jump);
+    btnDuck.addEventListener('pointerdown', () => setDuck(true));
+    btnDuck.addEventListener('pointerup', () => setDuck(false));
+    btnDuck.addEventListener('pointerleave', () => setDuck(false));
+    canvas.addEventListener('pointerdown', jump);
+
+    /* ---------- Chướng ngại vật ---------- */
+    function spawnObstacle() {
+      if (Math.random() < 0.3 && score > 150) {
+        // Chim bay: phải cúi hoặc nhảy qua
+        obstacles.push({ type: 'bird', x: W + 20, y: GROUND - 64, w: 38, h: 22 });
+      } else {
+        const h = 30 + Math.random() * 25;
+        const w = 16 + Math.random() * 16;
+        obstacles.push({ type: 'cactus', x: W + 20, y: GROUND - h, w, h });
+      }
+      nextGap = 280 + Math.random() * 280 + speed * 12;
+    }
+
+    /* ---------- Cập nhật ---------- */
+    function playerBox() {
+      const h = player.duck && player.onGround ? 36 : 64;
+      return { x: player.x - 12, y: player.y - h, w: 24, h };
+    }
+
+    function update() {
+      if (state !== 'playing') return;
+      frame++;
+      score += 0.15 * (speed / 6);
+      speed = Math.min(16, 6 + score / 250);
+
+      // Vật lý người que
+      player.vy += GRAVITY;
+      player.y += player.vy;
+      if (player.y >= GROUND) {
+        player.y = GROUND; player.vy = 0; player.onGround = true;
+      }
+
+      // Mây và nền
+      clouds.forEach(c => { c.x -= speed * 0.2; if (c.x < -80) c.x = W + 60; });
+      groundOffset = (groundOffset + speed) % 40;
+
+      // Chướng ngại vật
+      nextGap -= speed;
+      if (nextGap <= 0) spawnObstacle();
+      obstacles.forEach(o => o.x -= speed);
+      obstacles = obstacles.filter(o => o.x + o.w > -20);
+
+      // Va chạm (thu nhỏ hộp một chút cho dễ chơi)
+      const p = playerBox(), m = 4;
+      for (const o of obstacles) {
+        const bob = o.type === 'bird' ? Math.sin(frame * 0.3) * 2 : 0;
+        if (p.x + m < o.x + o.w && p.x + p.w - m > o.x &&
+          p.y + m < o.y + o.h + bob && p.y + p.h - m > o.y + bob) {
+          gameOver();
+        }
+      }
+    }
+
+    function gameOver() {
+      state = 'over';
+      if (Math.floor(score) > best) {
+        best = Math.floor(score);
+        try { localStorage.setItem('stickman_best', best); } catch (e) { }
+      }
+    }
+
+    /* ---------- Vẽ ---------- */
+    function line(x1, y1, x2, y2) {
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+    }
+
+    function drawStickman() {
+      const { x, y } = player;
+      const run = state === 'playing' ? frame * 0.35 : 0;
+      const swing = Math.sin(run) * 14;
+      ctx.strokeStyle = '#111'; ctx.lineWidth = 4; ctx.lineCap = 'round';
+
+      if (player.duck && player.onGround) {
+        // Tư thế cúi
+        ctx.beginPath(); ctx.arc(x + 8, y - 28, 9, 0, Math.PI * 2); ctx.stroke();   // đầu
+        line(x + 6, y - 19, x - 4, y - 12);                                          // thân
+        line(x - 4, y - 12, x + 8, y - 6); line(x + 8, y - 6, x + 4, y);             // chân 1
+        line(x - 4, y - 12, x - 12, y - 4); line(x - 12, y - 4, x - 6, y);           // chân 2
+        line(x + 2, y - 16, x + 16, y - 14);                                         // tay
+        return;
+      }
+
+      const headY = y - 54, hipY = y - 28;
+      ctx.beginPath(); ctx.arc(x, headY, 10, 0, Math.PI * 2); ctx.stroke();          // đầu
+      line(x, headY + 10, x, hipY);                                                  // thân
+
+      if (!player.onGround) {
+        // Đang nhảy: tay giơ lên, chân dang
+        line(x, y - 44, x - 16, y - 58); line(x, y - 44, x + 16, y - 58);
+        line(x, hipY, x - 12, y - 8); line(x, hipY, x + 14, y - 14);
+      } else {
+        // Đang chạy: tay chân vung đối nhau
+        line(x, y - 44, x + swing, y - 28); line(x, y - 44, x - swing, y - 28);
+        line(x, hipY, x + swing, y); line(x, hipY, x - swing, y);
+      }
+    }
+
+    function drawCactus(o) {
+      ctx.fillStyle = '#2e7d32';
+      ctx.fillRect(o.x, o.y, o.w, o.h);
+      ctx.fillRect(o.x - 7, o.y + o.h * 0.3, 7, 5);
+      ctx.fillRect(o.x - 7, o.y + o.h * 0.3 - 10, 5, 12);
+      ctx.fillRect(o.x + o.w, o.y + o.h * 0.5, 7, 5);
+      ctx.fillRect(o.x + o.w + 2, o.y + o.h * 0.5 - 10, 5, 12);
+    }
+
+    function drawBird(o) {
+      const flap = Math.sin(frame * 0.3) * 8;
+      const cx = o.x + o.w / 2, cy = o.y + o.h / 2;
+      ctx.fillStyle = '#c62828';
+      ctx.beginPath(); ctx.ellipse(cx, cy, 16, 8, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(cx - 14, cy); ctx.lineTo(cx - 24, cy - 4); ctx.lineTo(cx - 24, cy + 4); ctx.fill();
+      ctx.fillStyle = '#ef6c00';
+      ctx.beginPath(); ctx.moveTo(cx + 15, cy - 2); ctx.lineTo(cx + 24, cy + 1); ctx.lineTo(cx + 15, cy + 4); ctx.fill();
+      ctx.fillStyle = '#8e0000';
+      ctx.beginPath(); ctx.moveTo(cx - 6, cy); ctx.lineTo(cx + 4, cy); ctx.lineTo(cx - 2, cy - 14 + flap); ctx.fill();
+    }
+
+    function drawCloud(c) {
+      ctx.fillStyle = '#e3e8ee';
+      const r = 14 * c.s;
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, r, 0, Math.PI * 2);
+      ctx.arc(c.x + r, c.y - r * 0.5, r * 1.2, 0, Math.PI * 2);
+      ctx.arc(c.x + r * 2.2, c.y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, W, H);
+      clouds.forEach(drawCloud);
+
+      // Mặt đất
+      ctx.strokeStyle = '#111'; ctx.lineWidth = 2;
+      line(0, GROUND + 2, W, GROUND + 2);
+      ctx.strokeStyle = '#999'; ctx.lineWidth = 2;
+      for (let x = -groundOffset; x < W; x += 40) line(x, GROUND + 14, x + 12, GROUND + 14);
+
+      obstacles.forEach(o => o.type === 'bird' ? drawBird(o) : drawCactus(o));
+      drawStickman();
+
+      // Điểm số
+      ctx.fillStyle = '#111'; ctx.font = 'bold 20px monospace'; ctx.textAlign = 'right';
+      ctx.fillText('HI ' + String(best).padStart(5, '0') + '   ' + String(Math.floor(score)).padStart(5, '0'), W - 16, 30);
+
+      ctx.textAlign = 'center';
+      if (state === 'ready') {
+        ctx.font = 'bold 28px Arial'; ctx.fillText('Nhấn SPACE hoặc chạm để bắt đầu', W / 2, 120);
+      }
+      if (state === 'over') {
+        ctx.font = 'bold 36px Arial'; ctx.fillText('GAME OVER', W / 2, 110);
+        ctx.font = '20px Arial'; ctx.fillText('Nhấn SPACE hoặc chạm để chơi lại', W / 2, 145);
+      }
+    }
+
+    function loop() {
+      update();
+      draw();
+      requestAnimationFrame(loop);
+    }
+    loop();
+  </script>
+</body>
+
+</html>
